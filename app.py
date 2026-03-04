@@ -133,13 +133,9 @@ async def close_door():
 @app.post("/restart_dock_agent")
 async def restart_dock_agent():
     """Restart the dock-agent Docker container"""
-    docker_bin = (
-        subprocess.run(["which", "docker"], capture_output=True, text=True).stdout.strip()
-        or "/usr/bin/docker"
-    )
     try:
         result = subprocess.run(
-            [docker_bin, "restart", "dock-agent"],
+            ["docker", "restart", "dock-agent"],
             capture_output=True,
             text=True,
             timeout=30
