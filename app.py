@@ -1,5 +1,7 @@
 import os
 import logging
+import time
+import uuid
 from contextlib import asynccontextmanager
 
 import docker
@@ -18,6 +20,7 @@ log = logging.getLogger("drone-proxy")
 mqtt: MQTTClient | None = None
 drone_name: str = "Drone"
 land_url: str = "/land"
+dock_serial: str = ""
 
 CONFIG_PATH = os.environ.get(
     "CONFIG_PATH",
@@ -49,7 +52,7 @@ def load_app_config() -> dict:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global mqtt, drone_name, land_url
+    global mqtt, drone_name, land_url, dock_serial
     app_config = load_app_config()
     drone_name = app_config.get("drone_name", "Drone")
     land_url = app_config.get("land_url", "/land")
@@ -88,8 +91,19 @@ def _publish(command: dict, target: str = "dock_services") -> dict:
 
 
 def _build_command(method: str) -> dict:
-    """Build a command dict with method, empty data, and seq 0"""
+    """Build a DRC command dict"""
     return {"method": method, "data": {}, "seq": 0}
+
+
+def _build_services_command(method: str) -> dict:
+    """Build a services command dict with gateway, tid, bid, and timestamp"""
+    return {
+        "tid": str(uuid.uuid4()),
+        "bid": str(uuid.uuid4()),
+        "timestamp": int(time.time() * 1000),
+        "gateway": dock_serial,
+        "method": method,
+    }
 
 
 # ===== DRC Commands =====
@@ -111,13 +125,13 @@ async def take_authority():
 @app.get("/enter_debug_mode")
 async def debug_mode_on():
     """Enter debug mode"""
-    return _publish(_build_command("debug_mode_open"))
+    return _publish(_build_services_command("debug_mode_open"))
 
 
 @app.get("/exit_debug_mode")
 async def debug_mode_off():
     """Exit debug mode"""
-    return _publish(_build_command("debug_mode_close"))
+    return _publish(_build_services_command("debug_mode_close"))
 
 
 # ===== Drone Control =====
@@ -125,13 +139,13 @@ async def debug_mode_off():
 @app.get("/power_on_drone")
 async def drone_on():
     """Power on drone"""
-    return _publish(_build_command("drone_open"))
+    return _publish(_build_services_command("drone_open"))
 
 
 @app.get("/power_off_drone")
 async def drone_off():
     """Power off drone"""
-    return _publish(_build_command("drone_close"))
+    return _publish(_build_services_command("drone_close"))
 
 
 # ===== Dock Door Control =====
@@ -139,13 +153,13 @@ async def drone_off():
 @app.get("/open_dock_door")
 async def open_door():
     """Open dock cover/door"""
-    return _publish(_build_command("cover_open"))
+    return _publish(_build_services_command("cover_open"))
 
 
 @app.get("/close_dock_door")
 async def close_door():
     """Close dock cover/door"""
-    return _publish(_build_command("cover_close"))
+    return _publish(_build_services_command("cover_close"))
 
 
 # ===== System Control =====
