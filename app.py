@@ -1,5 +1,6 @@
 import os
 import logging
+import subprocess
 from contextlib import asynccontextmanager
 
 import yaml
@@ -59,13 +60,108 @@ def _publish(command: dict) -> dict:
     raise HTTPException(status_code=500, detail="Failed to publish MQTT message")
 
 
+def _build_command(method: str) -> dict:
+    """Build a command dict with method, empty data, and seq 0"""
+    return {"method": method, "data": {}, "seq": 0}
+
+
+# ===== DRC Commands =====
+
 @app.get("/land")
 async def force_landing():
-    return _publish({"method": "drc_force_landing", "data": {}, "seq": 0})
+    """Force drone to land"""
+    return _publish(_build_command("drc_force_landing"))
 
+
+@app.get("/authority")
+async def take_authority():
+    """Take control authority"""
+    return _publish(_build_command("drc_authority_grab"))
+
+
+# ===== Debug Mode =====
+
+@app.get("/debug/on")
+async def debug_mode_on():
+    """Enter debug mode"""
+    return _publish(_build_command("debug_mode_open"))
+
+
+@app.get("/debug/off")
+async def debug_mode_off():
+    """Exit debug mode"""
+    return _publish(_build_command("debug_mode_close"))
+
+
+# ===== Drone Control =====
+
+@app.get("/drone/on")
+async def drone_on():
+    """Power on drone"""
+    return _publish(_build_command("drone_open"))
+
+
+@app.get("/drone/off")
+async def drone_off():
+    """Power off drone"""
+    return _publish(_build_command("drone_close"))
+
+
+# ===== Dock Door Control =====
+
+@app.get("/door/open")
+async def open_door():
+    """Open dock cover/door"""
+    return _publish(_build_command("cover_open"))
+
+
+@app.get("/door/close")
+async def close_door():
+    """Close dock cover/door"""
+    return _publish(_build_command("cover_close"))
+
+
+# ===== System Control =====
+
+@app.post("/restart-dock-agent")
+async def restart_dock_agent():
+    """Restart the dock-agent Docker container"""
+    try:
+        result = subprocess.run(
+            ["docker", "restart", "dock-agent"],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        
+        if result.returncode == 0:
+            return {
+                "status": "success", 
+                "detail": "dock-agent container restarted successfully"
+            }
+        else:
+            raise HTTPException(
+                status_code=500, 
+                detail=f"Failed to restart dock-agent: {result.stderr}"
+            )
+            
+    except subprocess.TimeoutExpired:
+        raise HTTPException(
+            status_code=500, 
+            detail="Timeout while restarting dock-agent container"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Error restarting dock-agent: {str(e)}"
+        )
+
+
+# ===== Custom Command =====
 
 @app.post("/command")
 async def custom_command(request: Request):
+    """Send custom command with JSON body"""
     body = await request.json()
     return _publish(body)
 
