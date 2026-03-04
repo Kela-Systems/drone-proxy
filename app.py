@@ -88,13 +88,13 @@ async def take_authority():
 
 # ===== Debug Mode =====
 
-@app.get("/debug/on")
+@app.get("/enter_debug_mode")
 async def debug_mode_on():
     """Enter debug mode"""
     return _publish(_build_command("debug_mode_open"))
 
 
-@app.get("/debug/off")
+@app.get("/exit_debug_mode")
 async def debug_mode_off():
     """Exit debug mode"""
     return _publish(_build_command("debug_mode_close"))
@@ -102,13 +102,13 @@ async def debug_mode_off():
 
 # ===== Drone Control =====
 
-@app.get("/drone/on")
+@app.get("/power_on_drone")
 async def drone_on():
     """Power on drone"""
     return _publish(_build_command("drone_open"))
 
 
-@app.get("/drone/off")
+@app.get("/power_off_drone")
 async def drone_off():
     """Power off drone"""
     return _publish(_build_command("drone_close"))
@@ -116,13 +116,13 @@ async def drone_off():
 
 # ===== Dock Door Control =====
 
-@app.get("/door/open")
+@app.get("/open_dock_door")
 async def open_door():
     """Open dock cover/door"""
     return _publish(_build_command("cover_open"))
 
 
-@app.get("/door/close")
+@app.get("/close_dock_door")
 async def close_door():
     """Close dock cover/door"""
     return _publish(_build_command("cover_close"))
@@ -130,12 +130,16 @@ async def close_door():
 
 # ===== System Control =====
 
-@app.post("/restart-dock-agent")
+@app.post("/restart_dock_agent")
 async def restart_dock_agent():
     """Restart the dock-agent Docker container"""
+    docker_bin = (
+        subprocess.run(["which", "docker"], capture_output=True, text=True).stdout.strip()
+        or "/usr/bin/docker"
+    )
     try:
         result = subprocess.run(
-            ["docker", "restart", "dock-agent"],
+            [docker_bin, "restart", "dock-agent"],
             capture_output=True,
             text=True,
             timeout=30
