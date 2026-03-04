@@ -6,6 +6,7 @@ services:
     network_mode: host
     volumes:
       - ~/infra/config.yml:/config/config.yml:ro
+      - ~/infra/app_config.yml:/app/app_config.yml:ro
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
       - CONFIG_PATH=/config/config.yml

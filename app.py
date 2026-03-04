@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 import docker
 import yaml
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse
 
 from mqtt_client import MQTTClient
 
@@ -15,10 +16,16 @@ logging.basicConfig(
 log = logging.getLogger("drone-proxy")
 
 mqtt: MQTTClient | None = None
+drone_name: str = "Drone"
+land_url: str = "/land"
 
 CONFIG_PATH = os.environ.get(
     "CONFIG_PATH",
     os.path.join(os.path.expanduser("~"), "infra", "config.yml"),
+)
+APP_CONFIG_PATH = os.environ.get(
+    "APP_CONFIG_PATH",
+    os.path.join(os.path.dirname(__file__), "app_config.yml"),
 )
 MQTT_BROKER = os.environ.get("MQTT_BROKER", "localhost")
 MQTT_PORT = int(os.environ.get("MQTT_PORT", "1883"))
@@ -31,9 +38,22 @@ def load_config() -> dict:
         return yaml.safe_load(f)
 
 
+def load_app_config() -> dict:
+    try:
+        with open(APP_CONFIG_PATH) as f:
+            return yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        log.warning(f"app_config.yml not found at {APP_CONFIG_PATH}, using defaults")
+        return {}
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global mqtt
+    global mqtt, drone_name, land_url
+    app_config = load_app_config()
+    drone_name = app_config.get("drone_name", "Drone")
+    land_url = app_config.get("land_url", "/land")
+
     config = load_config()
     dock_serial = config["dock_serial"]
 
@@ -142,6 +162,116 @@ async def restart_dock_agent():
         raise HTTPException(status_code=404, detail="dock-agent container not found")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error restarting dock-agent: {str(e)}")
+
+
+# ===== UI =====
+
+@app.get("/", response_class=HTMLResponse)
+async def index():
+    return HTMLResponse(content="""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Drone Proxy</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      min-height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: #0f1117;
+      color: #e8eaf0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      gap: 32px;
+    }
+    #drone-name {
+      font-size: 1.1rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #8b9ab5;
+    }
+    #land-btn {
+      width: 160px;
+      height: 160px;
+      border-radius: 50%;
+      border: 3px solid #e53e3e;
+      background: #1a1d27;
+      color: #fc8181;
+      font-size: 1.25rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      cursor: pointer;
+      transition: background 0.15s, transform 0.1s, box-shadow 0.15s;
+      box-shadow: 0 0 0 0 rgba(229,62,62,0);
+    }
+    #land-btn:hover {
+      background: #2d1f1f;
+      box-shadow: 0 0 24px 4px rgba(229,62,62,0.35);
+    }
+    #land-btn:active { transform: scale(0.95); }
+    #land-btn.loading {
+      opacity: 0.5;
+      cursor: not-allowed;
+      pointer-events: none;
+    }
+    #status {
+      font-size: 0.875rem;
+      min-height: 1.2em;
+      color: #68d391;
+    }
+    #status.error { color: #fc8181; }
+  </style>
+</head>
+<body>
+  <div id="drone-name">Loading…</div>
+  <button id="land-btn">LAND</button>
+  <div id="status"></div>
+
+  <script>
+    const nameEl = document.getElementById('drone-name');
+    const btn = document.getElementById('land-btn');
+    const status = document.getElementById('status');
+
+    let landUrl = '/land';
+    fetch('/config')
+      .then(r => r.json())
+      .then(d => {
+        nameEl.textContent = d.drone_name;
+        landUrl = d.land_url || '/land';
+      });
+
+    btn.addEventListener('click', async () => {
+      btn.classList.add('loading');
+      status.textContent = '';
+      status.className = '';
+      try {
+        const res = await fetch(landUrl);
+        const data = await res.json();
+        if (res.ok) {
+          status.textContent = 'Land command sent';
+        } else {
+          status.className = 'error';
+          status.textContent = data.detail || 'Error';
+        }
+      } catch (e) {
+        status.className = 'error';
+        status.textContent = 'Request failed';
+      } finally {
+        btn.classList.remove('loading');
+      }
+    });
+  </script>
+</body>
+</html>""")
+
+
+@app.get("/config")
+async def get_config():
+    return {"drone_name": drone_name, "land_url": land_url}
 
 
 # ===== Custom Command =====
