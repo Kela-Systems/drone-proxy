@@ -12,12 +12,12 @@ logger = logging.getLogger(__name__)
 
 
 class MQTTClient:
-    """MQTT client for dock commands"""
+    """MQTT client for drone and dock commands"""
     
-    def __init__(self, broker: str, port: int, drc_dock_topic: str):
+    def __init__(self, broker: str, port: int, **topics: str):
         self.broker = broker
         self.port = port
-        self.drc_dock_topic = drc_dock_topic
+        self.topics = topics
         self.client = mqtt.Client()
         self.connected = False
         self._reconnecting = False
@@ -85,17 +85,30 @@ class MQTTClient:
         thread = threading.Thread(target=reconnect_loop, daemon=True)
         thread.start()
 
-    def publish_command(self, command: dict) -> bool:
-        """Publish a command to the drc_dock topic"""
+    def publish_command(self, command: dict, target: str = "drc_dock") -> bool:
+        """
+        Publish a command to the specified target topic.
+        
+        Args:
+            command: Command payload dict
+            target: Key name matching a topic passed to __init__
+                    (e.g. 'drc_dock', 'drc_drone', 'dock_services', …)
+        """
+        topic = self.topics.get(target)
+        if topic is None:
+            logger.error(
+                f"Unknown target '{target}'. Available: {list(self.topics)}"
+            )
+            return False
         try:
             payload = json.dumps(command)
-            result = self.client.publish(self.drc_dock_topic, payload)
+            result = self.client.publish(topic, payload)
             if result.rc == mqtt.MQTT_ERR_SUCCESS:
-                logger.info(f"Command published to {self.drc_dock_topic}: {command}")
+                logger.info(f"Command published to {target} ({topic}): {command}")
                 return True
             else:
-                logger.error(f"Failed to publish command. Return code: {result.rc}")
+                logger.error(f"Failed to publish to {target}. Return code: {result.rc}")
                 return False
         except Exception as e:
-            logger.error(f"Error publishing command: {e}")
+            logger.error(f"Error publishing command to {target}: {e}")
             return False

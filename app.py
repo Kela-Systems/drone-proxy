@@ -37,10 +37,17 @@ async def lifespan(app: FastAPI):
     config = load_config()
     dock_serial = config["dock_serial"]
 
+    drone_serial = config.get("drone_serial")
+
+    topics = {
+        "drc_dock": f"thing/product/{dock_serial}/drc/down",
+        "dock_services": f"thing/product/{dock_serial}/services",
+    }
+
     mqtt = MQTTClient(
         broker=MQTT_BROKER,
         port=MQTT_PORT,
-        drc_dock_topic=f"thing/product/{dock_serial}/drc/down",
+        **topics,
     )
     mqtt.client.username_pw_set(MQTT_USER, MQTT_PASS)
     mqtt.connect()
@@ -51,12 +58,12 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Drone Proxy", lifespan=lifespan)
 
 
-def _publish(command: dict) -> dict:
+def _publish(command: dict, target: str = "dock_services") -> dict:
     if mqtt is None or not mqtt.connected:
         raise HTTPException(status_code=503, detail="MQTT client not connected")
-    ok = mqtt.publish_command(command)
+    ok = mqtt.publish_command(command, target=target)
     if ok:
-        return {"status": "success", "command": command}
+        return {"status": "success", "target": target, "command": command}
     raise HTTPException(status_code=500, detail="Failed to publish MQTT message")
 
 
@@ -70,13 +77,13 @@ def _build_command(method: str) -> dict:
 @app.get("/land")
 async def force_landing():
     """Force drone to land"""
-    return _publish(_build_command("drc_force_landing"))
+    return _publish(_build_command("drc_force_landing"), target="drc_dock")
 
 
 @app.get("/authority")
 async def take_authority():
     """Take control authority"""
-    return _publish(_build_command("drc_authority_grab"))
+    return _publish(_build_command("drc_authority_grab"), target="drc_dock")
 
 
 # ===== Debug Mode =====
