@@ -1,0 +1,14 @@
+services:
+  drone-proxy:
+    build: .
+    container_name: drone-proxy
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ~/infra/config.yml:/config/config.yml:ro
+    environment:
+      - CONFIG_PATH=/config/config.yml
+      - MQTT_BROKER=localhost
+      - MQTT_PORT=1883
+      - MQTT_USER=eyesatop
+      - MQTT_PASS=eyesatop
