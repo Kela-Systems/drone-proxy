@@ -1,8 +1,8 @@
 import os
 import logging
-import subprocess
 from contextlib import asynccontextmanager
 
+import docker
 import yaml
 from fastapi import FastAPI, HTTPException, Request
 
@@ -130,38 +130,18 @@ async def close_door():
 
 # ===== System Control =====
 
-@app.post("/restart_dock_agent")
+@app.post("/restart-dock-agent")
 async def restart_dock_agent():
     """Restart the dock-agent Docker container"""
     try:
-        result = subprocess.run(
-            ["docker", "restart", "dock-agent"],
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
-        
-        if result.returncode == 0:
-            return {
-                "status": "success", 
-                "detail": "dock-agent container restarted successfully"
-            }
-        else:
-            raise HTTPException(
-                status_code=500, 
-                detail=f"Failed to restart dock-agent: {result.stderr}"
-            )
-            
-    except subprocess.TimeoutExpired:
-        raise HTTPException(
-            status_code=500, 
-            detail="Timeout while restarting dock-agent container"
-        )
+        client = docker.from_env()
+        container = client.containers.get("dock-agent")
+        container.restart(timeout=30)
+        return {"status": "success", "detail": "dock-agent container restarted successfully"}
+    except docker.errors.NotFound:
+        raise HTTPException(status_code=404, detail="dock-agent container not found")
     except Exception as e:
-        raise HTTPException(
-            status_code=500, 
-            detail=f"Error restarting dock-agent: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Error restarting dock-agent: {str(e)}")
 
 
 # ===== Custom Command =====
