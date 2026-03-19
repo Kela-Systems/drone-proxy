@@ -1,6 +1,7 @@
 services:
   drone-proxy:
     build: .
+    image: drone-proxy
     container_name: drone-proxy
     restart: unless-stopped
     network_mode: host

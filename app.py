@@ -21,6 +21,8 @@ mqtt: MQTTClient | None = None
 drone_name: str = "Drone"
 land_url: str = "/land"
 dock_serial: str = ""
+osd_topic: str = ""
+device_state: dict = {}
 
 CONFIG_PATH = os.environ.get(
     "CONFIG_PATH",
@@ -50,9 +52,21 @@ def load_app_config() -> dict:
         return {}
 
 
+def _on_osd(_topic: str, payload: dict):
+    """Merge each OSD push into the accumulated device_state."""
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return
+    for key, val in data.items():
+        if isinstance(val, dict) and isinstance(device_state.get(key), dict):
+            device_state[key].update(val)
+        else:
+            device_state[key] = val
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global mqtt, drone_name, land_url, dock_serial
+    global mqtt, drone_name, land_url, dock_serial, osd_topic
     app_config = load_app_config()
     drone_name = app_config.get("drone_name", "Drone")
     land_url = app_config.get("land_url", "/land")
@@ -67,6 +81,8 @@ async def lifespan(app: FastAPI):
         "dock_services": f"thing/product/{dock_serial}/services",
     }
 
+    osd_topic = f"thing/product/{dock_serial}/osd"
+
     mqtt = MQTTClient(
         broker=MQTT_BROKER,
         port=MQTT_PORT,
@@ -74,6 +90,7 @@ async def lifespan(app: FastAPI):
     )
     mqtt.client.username_pw_set(MQTT_USER, MQTT_PASS)
     mqtt.connect()
+    mqtt.subscribe(osd_topic, callback=_on_osd)
     yield
     mqtt.disconnect()
 
@@ -195,11 +212,10 @@ async def index():
       display: flex;
       flex-direction: column;
       align-items: center;
-      justify-content: center;
       background: #0f1117;
       color: #e8eaf0;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      gap: 32px;
+      padding: 40px 16px 60px;
     }
     #drone-name {
       font-size: 1.1rem;
@@ -207,76 +223,378 @@ async def index():
       letter-spacing: 0.08em;
       text-transform: uppercase;
       color: #8b9ab5;
+      margin-bottom: 6px;
+    }
+    #mqtt-badge {
+      font-size: 0.7rem;
+      font-weight: 500;
+      margin-bottom: 24px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: #5a6580;
+    }
+    #mqtt-badge .dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: #4a5568;
+    }
+    #mqtt-badge.ok        { color: #68d391; }
+    #mqtt-badge.ok .dot   { background: #68d391; }
+    #mqtt-badge.warn      { color: #f6e05e; }
+    #mqtt-badge.warn .dot { background: #f6e05e; }
+    #mqtt-badge.err       { color: #fc8181; }
+    #mqtt-badge.err .dot  { background: #fc8181; }
+
+    .land-wrap { margin-bottom: 36px; text-align: center; }
+    .land-ring {
+      width: 152px; height: 152px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: conic-gradient(#e53e3e calc(var(--p, 0) * 1%), #2d3348 0%);
+      margin: 0 auto;
+      transition: none;
+    }
+    .land-ring.done {
+      background: #e53e3e;
     }
     #land-btn {
-      width: 160px;
-      height: 160px;
+      width: 140px; height: 140px;
       border-radius: 50%;
-      border: 3px solid #e53e3e;
+      border: none;
       background: #1a1d27;
       color: #fc8181;
-      font-size: 1.25rem;
-      font-weight: 700;
+      font-size: 1.2rem; font-weight: 700;
       letter-spacing: 0.06em;
       cursor: pointer;
-      transition: background 0.15s, transform 0.1s, box-shadow 0.15s;
-      box-shadow: 0 0 0 0 rgba(229,62,62,0);
+      transition: background 0.15s;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: none;
+      position: relative;
     }
-    #land-btn:hover {
-      background: #2d1f1f;
-      box-shadow: 0 0 24px 4px rgba(229,62,62,0.35);
+    #land-btn:hover { background: #2d1f1f; }
+    .land-hint {
+      margin-top: 10px;
+      font-size: 0.7rem;
+      color: #5a6580;
+      letter-spacing: 0.04em;
+      min-height: 1.2em;
     }
-    #land-btn:active { transform: scale(0.95); }
-    #land-btn.loading {
-      opacity: 0.5;
+
+    .sections { width: 100%; max-width: 480px; display: flex; flex-direction: column; gap: 20px; }
+    .section {
+      background: #181b24;
+      border: 1px solid #262a36;
+      border-radius: 12px;
+      padding: 16px;
+    }
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    .section-title {
+      font-size: 0.7rem;
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: #5a6580;
+    }
+    .badge {
+      font-size: 0.65rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      padding: 2px 8px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      background: #1e2130;
+      color: #4a5568;
+      border: 1px solid #2d3348;
+      transition: all 0.3s;
+    }
+    .badge .dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: #4a5568;
+      transition: background 0.3s;
+    }
+    .badge.on        { color: #68d391; border-color: #276749; background: #13261c; }
+    .badge.on .dot   { background: #68d391; }
+    .badge.off       { color: #a0aec0; border-color: #2d3348; background: #1e2130; }
+    .badge.off .dot  { background: #4a5568; }
+    .badge.warn      { color: #f6e05e; border-color: #5a4a1e; background: #262318; }
+    .badge.warn .dot { background: #f6e05e; }
+
+    .btn-row { display: flex; gap: 10px; }
+    .btn-row .action-btn { flex: 1; }
+    .action-btn {
+      padding: 12px 16px;
+      border-radius: 8px;
+      border: 1px solid #2d3348;
+      background: #1e2130;
+      color: #c5cde0;
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.12s, border-color 0.12s, transform 0.08s;
+    }
+    .action-btn:hover { background: #262b3f; border-color: #3d4560; }
+    .action-btn:active { transform: scale(0.97); }
+    .action-btn.green  { color: #68d391; border-color: #276749; }
+    .action-btn.green:hover  { background: #1a2e24; border-color: #38a169; }
+    .action-btn.red    { color: #fc8181; border-color: #742a2a; }
+    .action-btn.red:hover    { background: #2d1f1f; border-color: #e53e3e; }
+    .action-btn.blue   { color: #63b3ed; border-color: #2a4365; }
+    .action-btn.blue:hover   { background: #1a2535; border-color: #3182ce; }
+    .action-btn.orange { color: #f6ad55; border-color: #5a3a1e; }
+    .action-btn.orange:hover { background: #2d251a; border-color: #dd6b20; }
+    .action-btn.loading {
+      opacity: 0.45;
       cursor: not-allowed;
       pointer-events: none;
     }
-    #status {
-      font-size: 0.875rem;
-      min-height: 1.2em;
+
+    #toast {
+      position: fixed;
+      bottom: 20px;
+      left: 50%; transform: translateX(-50%);
+      font-size: 0.85rem;
+      font-weight: 500;
+      padding: 8px 20px;
+      border-radius: 8px;
+      background: #1a2e24;
       color: #68d391;
+      border: 1px solid #276749;
+      opacity: 0;
+      transition: opacity 0.25s;
+      pointer-events: none;
+      white-space: nowrap;
     }
-    #status.error { color: #fc8181; }
+    #toast.visible { opacity: 1; }
+    #toast.error { background: #2d1f1f; color: #fc8181; border-color: #742a2a; }
   </style>
 </head>
 <body>
   <div id="drone-name">Loading…</div>
-  <button id="land-btn">LAND</button>
-  <div id="status"></div>
+  <div id="mqtt-badge"><span class="dot"></span><span id="mqtt-text">Connecting…</span></div>
+
+  <div class="land-wrap">
+    <div class="land-ring" id="land-ring">
+      <button id="land-btn" data-url="/land" data-label="Land command sent">LAND</button>
+    </div>
+    <div class="land-hint" id="land-hint">Hold to land</div>
+  </div>
+
+  <div class="sections">
+    <div class="section">
+      <div class="section-header">
+        <div class="section-title">Flight Control</div>
+      </div>
+      <div class="btn-row">
+        <button class="action-btn blue" data-url="/authority" data-label="Authority grabbed">Take Authority</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-header">
+        <div class="section-title">Debug Mode</div>
+        <div class="badge" id="badge-debug"><span class="dot"></span><span>—</span></div>
+      </div>
+      <div class="btn-row">
+        <button class="action-btn green" data-url="/enter_debug_mode" data-label="Debug mode entered">Enter Debug</button>
+        <button class="action-btn red" data-url="/exit_debug_mode" data-label="Debug mode exited">Exit Debug</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-header">
+        <div class="section-title">Drone Power</div>
+        <div class="badge" id="badge-drone"><span class="dot"></span><span>—</span></div>
+      </div>
+      <div class="btn-row">
+        <button class="action-btn green" data-url="/power_on_drone" data-label="Drone powered on">Power On</button>
+        <button class="action-btn red" data-url="/power_off_drone" data-label="Drone powered off">Power Off</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-header">
+        <div class="section-title">Dock Door</div>
+        <div class="badge" id="badge-cover"><span class="dot"></span><span>—</span></div>
+      </div>
+      <div class="btn-row">
+        <button class="action-btn green" data-url="/open_dock_door" data-label="Dock door opened">Open Door</button>
+        <button class="action-btn red" data-url="/close_dock_door" data-label="Dock door closed">Close Door</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-header">
+        <div class="section-title">System</div>
+      </div>
+      <div class="btn-row">
+        <button class="action-btn orange" data-url="/restart-dock-agent" data-method="POST" data-label="Dock agent restarted">Restart Dock Agent</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast"></div>
 
   <script>
-    const nameEl = document.getElementById('drone-name');
-    const btn = document.getElementById('land-btn');
-    const status = document.getElementById('status');
+    const nameEl    = document.getElementById('drone-name');
+    const mqttBadge = document.getElementById('mqtt-badge');
+    const mqttText  = document.getElementById('mqtt-text');
+    const toastEl   = document.getElementById('toast');
+    let hideTimer;
 
-    let landUrl = '/land';
     fetch('/config')
       .then(r => r.json())
       .then(d => {
         nameEl.textContent = d.drone_name;
-        landUrl = d.land_url || '/land';
+        const landBtn = document.getElementById('land-btn');
+        if (d.land_url) landBtn.dataset.url = d.land_url;
       });
 
-    btn.addEventListener('click', async () => {
-      btn.classList.add('loading');
-      status.textContent = '';
-      status.className = '';
+    /* ---- status polling ---- */
+    function setBadge(id, cls, text) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.className = 'badge ' + cls;
+      el.querySelector('span:last-child').textContent = text;
+    }
+
+    async function pollStatus() {
       try {
-        const res = await fetch(landUrl);
-        const data = await res.json();
-        if (res.ok) {
-          status.textContent = 'Land command sent';
-        } else {
-          status.className = 'error';
-          status.textContent = data.detail || 'Error';
+        const res = await fetch('/status');
+        const s = await res.json();
+
+        if (!s.mqtt_connected) {
+          mqttBadge.className = 'err';
+          mqttText.textContent = 'MQTT disconnected';
+          return;
+        }
+        if (!s.osd_received) {
+          mqttBadge.className = 'warn';
+          mqttText.textContent = 'MQTT ok · waiting for OSD';
+          return;
+        }
+
+        mqttBadge.className = 'ok';
+        mqttText.textContent = 'MQTT connected · OSD live';
+
+        /* dock_mode_code: 0=idle, 1=local debug, 2=remote debug */
+        if (s.dock_mode_code === 1 || s.dock_mode_code === 2) {
+          setBadge('badge-debug', 'on', 'Active');
+        } else if (s.dock_mode_code !== null && s.dock_mode_code !== undefined) {
+          setBadge('badge-debug', 'off', 'Inactive');
+        }
+
+        /* drone online */
+        if (s.drone_online === 1) {
+          setBadge('badge-drone', 'on', 'On');
+        } else if (s.drone_online !== null && s.drone_online !== undefined) {
+          setBadge('badge-drone', 'off', 'Off');
+        }
+
+        /* cover_state: 0=closed, 1=open, 2=half-open */
+        if (s.cover_state === 1) {
+          setBadge('badge-cover', 'on', 'Open');
+        } else if (s.cover_state === 2) {
+          setBadge('badge-cover', 'warn', 'Half-open');
+        } else if (s.cover_state === 0) {
+          setBadge('badge-cover', 'off', 'Closed');
         }
       } catch (e) {
-        status.className = 'error';
-        status.textContent = 'Request failed';
+        mqttBadge.className = 'err';
+        mqttText.textContent = 'Status unavailable';
+      }
+    }
+
+    pollStatus();
+    setInterval(pollStatus, 2000);
+
+    /* ---- action buttons ---- */
+    function showToast(msg, isError) {
+      clearTimeout(hideTimer);
+      toastEl.textContent = msg;
+      toastEl.className = isError ? 'error visible' : 'visible';
+      hideTimer = setTimeout(() => { toastEl.className = ''; }, 3000);
+    }
+
+    async function runAction(btn) {
+      const url = btn.dataset.url;
+      const method = btn.dataset.method || 'GET';
+      const label = btn.dataset.label || 'Command sent';
+      btn.classList.add('loading');
+      try {
+        const res = await fetch(url, { method });
+        const data = await res.json();
+        if (res.ok) {
+          showToast(label, false);
+        } else {
+          showToast(data.detail || 'Error', true);
+        }
+      } catch (e) {
+        showToast('Request failed', true);
       } finally {
         btn.classList.remove('loading');
       }
+    }
+
+    /* ---- land long-press ---- */
+    const HOLD_MS = 2000;
+    const landBtn  = document.getElementById('land-btn');
+    const landRing = document.getElementById('land-ring');
+    const landHint = document.getElementById('land-hint');
+    let landStart = 0, landRaf = 0, landFired = false;
+
+    function landProgress() {
+      const elapsed = Date.now() - landStart;
+      const pct = Math.min(elapsed / HOLD_MS * 100, 100);
+      landRing.style.setProperty('--p', pct);
+      if (pct < 100) {
+        landRaf = requestAnimationFrame(landProgress);
+      } else {
+        landFired = true;
+        landRing.classList.add('done');
+        landHint.textContent = 'Sending…';
+        runAction(landBtn).then(() => {
+          landHint.textContent = 'Hold to land';
+        });
+      }
+    }
+
+    function startHold(e) {
+      e.preventDefault();
+      if (landFired) return;
+      landStart = Date.now();
+      landHint.textContent = 'Keep holding…';
+      landRaf = requestAnimationFrame(landProgress);
+    }
+
+    function cancelHold() {
+      cancelAnimationFrame(landRaf);
+      landRing.style.setProperty('--p', 0);
+      landRing.classList.remove('done');
+      if (!landFired) landHint.textContent = 'Hold to land';
+      landFired = false;
+    }
+
+    landBtn.addEventListener('mousedown',  startHold);
+    landBtn.addEventListener('touchstart', startHold, { passive: false });
+    landBtn.addEventListener('mouseup',    cancelHold);
+    landBtn.addEventListener('mouseleave', cancelHold);
+    landBtn.addEventListener('touchend',   cancelHold);
+    landBtn.addEventListener('touchcancel', cancelHold);
+
+    document.querySelectorAll('.action-btn').forEach(btn => {
+      btn.addEventListener('click', function() { runAction(this); });
     });
   </script>
 </body>
@@ -286,6 +604,34 @@ async def index():
 @app.get("/config")
 async def get_config():
     return {"drone_name": drone_name, "land_url": land_url}
+
+
+@app.get("/status")
+async def get_status():
+    """Return current device state parsed from accumulated OSD messages."""
+    if mqtt is None:
+        return {"mqtt_connected": False}
+    if not device_state:
+        return {"mqtt_connected": mqtt.connected, "osd_received": False}
+    sub = device_state.get("sub_device", {})
+    return {
+        "mqtt_connected": mqtt.connected,
+        "osd_received": True,
+        "dock_mode_code": device_state.get("mode_code"),
+        "cover_state": device_state.get("cover_state"),
+        "drone_in_dock": device_state.get("drone_in_dock"),
+        "putter_state": device_state.get("putter_state"),
+        "drone_online": sub.get("device_online_status"),
+        "drone_mode_code": sub.get("mode_code"),
+    }
+
+
+@app.get("/status/raw")
+async def get_status_raw():
+    """Return the full accumulated OSD state for debugging."""
+    if mqtt is None:
+        return {"mqtt_connected": False}
+    return {"mqtt_connected": mqtt.connected, "state": device_state}
 
 
 # ===== Custom Command =====
