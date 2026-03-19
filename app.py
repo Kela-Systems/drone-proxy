@@ -20,7 +20,6 @@ log = logging.getLogger("drone-proxy")
 
 mqtt: MQTTClient | None = None
 drone_name: str = "Drone"
-land_url: str = "/land"
 dock_serial: str = ""
 osd_topic: str = ""
 device_state: dict = {}
@@ -28,10 +27,6 @@ device_state: dict = {}
 CONFIG_PATH = os.environ.get(
     "CONFIG_PATH",
     os.path.join(os.path.expanduser("~"), "infra", "config.yml"),
-)
-APP_CONFIG_PATH = os.environ.get(
-    "APP_CONFIG_PATH",
-    os.path.join(os.path.dirname(__file__), "app_config.yml"),
 )
 IDENTITY_PATH = os.environ.get(
     "IDENTITY_PATH",
@@ -48,15 +43,6 @@ def load_config() -> dict:
         return yaml.safe_load(f)
 
 
-def load_app_config() -> dict:
-    try:
-        with open(APP_CONFIG_PATH) as f:
-            return yaml.safe_load(f) or {}
-    except FileNotFoundError:
-        log.warning(f"app_config.yml not found at {APP_CONFIG_PATH}, using defaults")
-        return {}
-
-
 def _on_osd(_topic: str, payload: dict):
     """Merge each OSD push into the accumulated device_state."""
     data = payload.get("data")
@@ -71,17 +57,15 @@ def _on_osd(_topic: str, payload: dict):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global mqtt, drone_name, land_url, dock_serial, osd_topic
-    app_config = load_app_config()
-    land_url = app_config.get("land_url", "/land")
+    global mqtt, drone_name, dock_serial, osd_topic
 
     try:
         with open(IDENTITY_PATH) as f:
             identity = json.load(f)
         drone_name = identity.get("name", "Drone")
     except Exception as e:
-        log.warning(f"Could not read identity file: {e}, falling back to app_config")
-        drone_name = app_config.get("drone_name", "Drone")
+        log.warning(f"Could not read identity file: {e}, using default name")
+        drone_name = "Drone"
 
     config = load_config()
     dock_serial = config["dock_serial"]
@@ -211,6 +195,8 @@ async def restart_dock_agent():
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
+    import html
+    safe_name = html.escape(drone_name)
     return HTMLResponse(content="""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -393,7 +379,7 @@ async def index():
   </style>
 </head>
 <body>
-  <div id="drone-name">Loading…</div>
+  <div id="drone-name">{{DRONE_NAME}}</div>
   <div id="mqtt-badge"><span class="dot"></span><span id="mqtt-text">Connecting…</span></div>
 
   <div class="land-wrap">
@@ -459,19 +445,10 @@ async def index():
   <div id="toast"></div>
 
   <script>
-    const nameEl    = document.getElementById('drone-name');
     const mqttBadge = document.getElementById('mqtt-badge');
     const mqttText  = document.getElementById('mqtt-text');
     const toastEl   = document.getElementById('toast');
     let hideTimer;
-
-    fetch('/config')
-      .then(r => r.json())
-      .then(d => {
-        nameEl.textContent = d.drone_name;
-        const landBtn = document.getElementById('land-btn');
-        if (d.land_url) landBtn.dataset.url = d.land_url;
-      });
 
     /* ---- status polling ---- */
     function setBadge(id, cls, text) {
@@ -610,12 +587,7 @@ async def index():
     });
   </script>
 </body>
-</html>""")
-
-
-@app.get("/config")
-async def get_config():
-    return {"drone_name": drone_name, "land_url": land_url}
+</html>""".replace("{{DRONE_NAME}}", safe_name))
 
 
 @app.get("/status")
