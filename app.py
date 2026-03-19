@@ -1,3 +1,4 @@
+import json
 import os
 import logging
 import time
@@ -31,6 +32,10 @@ CONFIG_PATH = os.environ.get(
 APP_CONFIG_PATH = os.environ.get(
     "APP_CONFIG_PATH",
     os.path.join(os.path.dirname(__file__), "app_config.yml"),
+)
+IDENTITY_PATH = os.environ.get(
+    "IDENTITY_PATH",
+    os.path.join(os.path.expanduser("~"), "infra", "data", "identity.txt"),
 )
 MQTT_BROKER = os.environ.get("MQTT_BROKER", "localhost")
 MQTT_PORT = int(os.environ.get("MQTT_PORT", "1883"))
@@ -68,8 +73,15 @@ def _on_osd(_topic: str, payload: dict):
 async def lifespan(app: FastAPI):
     global mqtt, drone_name, land_url, dock_serial, osd_topic
     app_config = load_app_config()
-    drone_name = app_config.get("drone_name", "Drone")
     land_url = app_config.get("land_url", "/land")
+
+    try:
+        with open(IDENTITY_PATH) as f:
+            identity = json.load(f)
+        drone_name = identity.get("name", "Drone")
+    except Exception as e:
+        log.warning(f"Could not read identity file: {e}, falling back to app_config")
+        drone_name = app_config.get("drone_name", "Drone")
 
     config = load_config()
     dock_serial = config["dock_serial"]
