@@ -177,6 +177,12 @@ async def close_door():
 
 # ===== System Control =====
 
+@app.post("/reboot_dock")
+async def reboot_dock():
+    """Reboot the dock"""
+    return _publish(_build_services_command("device_reboot"))
+
+
 @app.post("/restart-dock-agent")
 async def restart_dock_agent():
     """Restart the dock-agent Docker container"""
@@ -438,6 +444,7 @@ async def index():
       </div>
       <div class="btn-row">
         <button class="action-btn orange" data-url="/restart-dock-agent" data-method="POST" data-label="Dock agent restarted">Restart Dock Agent</button>
+        <button class="action-btn red" data-url="/reboot_dock" data-method="POST" data-label="Dock reboot sent" data-confirm="Reboot the dock? This will take the dock offline for several minutes.">Reboot Dock</button>
       </div>
     </div>
   </div>
@@ -520,6 +527,8 @@ async def index():
       const url = btn.dataset.url;
       const method = btn.dataset.method || 'GET';
       const label = btn.dataset.label || 'Command sent';
+      const confirmMsg = btn.dataset.confirm;
+      if (confirmMsg && !confirm(confirmMsg)) return;
       btn.classList.add('loading');
       try {
         const res = await fetch(url, { method });
